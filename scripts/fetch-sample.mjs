@@ -60,4 +60,59 @@ for (let offset = 0; offset < TOTAL; offset += PAGE_SIZE) {
 
 await mkdir(dirname(outPath), { recursive: true })
 await writeFile(outPath, JSON.stringify(rows))
-console.log(`Wrote ${rows.length} rows → ${outPath}`)
+console.log(`Wrote ${rows.length} recent rows`)
+
+const EXTRA_DAYS = 90
+const PER_DAY = 120
+const oldestRecentDay = rows.reduce((oldest, row) => {
+  const day = String(row.created_date).slice(0, 10)
+  return day < oldest ? day : oldest
+}, '9999-99-99')
+
+const shiftDay = (day, amount) => {
+  const date = new Date(`${day}T00:00:00Z`)
+  date.setUTCDate(date.getUTCDate() + amount)
+  return date.toISOString().slice(0, 10)
+}
+
+const seen = new Set(rows.map((row) => row.unique_key))
+let added = 0
+
+for (let offset = EXTRA_DAYS; offset >= 1; offset -= 1) {
+  const day = shiftDay(oldestRecentDay, -offset)
+  const next = shiftDay(day, 1)
+  const url = new URL('https://data.cityofnewyork.us/resource/erm2-nwe9.json')
+  url.searchParams.set('$select', fields.join(','))
+  url.searchParams.set('$order', 'created_date DESC, unique_key DESC')
+  url.searchParams.set('$limit', String(PER_DAY))
+  url.searchParams.set(
+    '$where',
+    `created_date >= '${day}T00:00:00' AND created_date < '${next}T00:00:00'`,
+  )
+
+  const res = await fetch(url, { headers })
+  if (!res.ok) {
+    throw new Error(`Socrata request failed for ${day}: ${res.status} ${await res.text()}`)
+  }
+
+  const page = await res.json()
+  if (!Array.isArray(page)) {
+    throw new Error(`Unexpected response for ${day}`)
+  }
+
+  for (const row of page) {
+    if (seen.has(row.unique_key)) continue
+    seen.add(row.unique_key)
+    rows.push(row)
+    added += 1
+  }
+  console.log(`${day}: ${page.length} rows`)
+}
+
+rows.sort(
+  (a, b) =>
+    String(b.created_date).localeCompare(String(a.created_date)) ||
+    String(b.unique_key).localeCompare(String(a.unique_key)),
+)
+await writeFile(outPath, JSON.stringify(rows))
+console.log(`Added ${added} older rows. Wrote ${rows.length} rows → ${outPath}`)

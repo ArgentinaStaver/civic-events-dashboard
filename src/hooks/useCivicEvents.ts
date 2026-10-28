@@ -7,6 +7,45 @@ const TIMELINE_EVENT_LIMIT = 10_000
 
 const text = (value: string | undefined): string => value?.trim() ?? ''
 
+const selectTimelineEvents = (events: CivicEventModel[]): CivicEventModel[] => {
+  const byDay = new Map<string, CivicEventModel[]>()
+
+  for (const event of events) {
+    const day = event.date.slice(0, 10)
+    const group = byDay.get(day)
+    if (group) group.push(event)
+    else byDay.set(day, [event])
+  }
+
+  for (const group of byDay.values()) {
+    group.sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id))
+  }
+
+  const days = [...byDay.keys()].sort((a, b) => b.localeCompare(a))
+  const quotas = new Map<string, number>()
+  let remaining = TIMELINE_EVENT_LIMIT
+  let pending = days.filter((day) => (byDay.get(day)?.length ?? 0) > 0)
+
+  while (remaining > 0 && pending.length > 0) {
+    const share = Math.max(1, Math.floor(remaining / pending.length))
+    const nextPending: string[] = []
+
+    for (const day of pending) {
+      if (remaining === 0) break
+      const available = (byDay.get(day)?.length ?? 0) - (quotas.get(day) ?? 0)
+      if (available <= 0) continue
+      const take = Math.min(share, available, remaining)
+      quotas.set(day, (quotas.get(day) ?? 0) + take)
+      remaining -= take
+      if (available > take) nextPending.push(day)
+    }
+
+    pending = nextPending
+  }
+
+  return days.flatMap((day) => (byDay.get(day) ?? []).slice(0, quotas.get(day) ?? 0))
+}
+
 const toLocalEvent = (request: CivicEventRequestModel): CivicEventModel => ({
   id: request.id ?? `local-${crypto.randomUUID()}`,
   title: request.title.trim() || 'Untitled request',
@@ -99,9 +138,9 @@ export const useCivicEvents = () => {
 
   const timelineEvents = useMemo(
     () =>
-      [...events]
-        .sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id))
-        .slice(0, TIMELINE_EVENT_LIMIT),
+      selectTimelineEvents(events).sort(
+        (a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id),
+      ),
     [events],
   )
 

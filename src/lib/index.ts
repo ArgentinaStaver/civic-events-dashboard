@@ -1,4 +1,5 @@
 export { default as DataGrid } from './DataGrid/DataGrid';
 export type { DataGridColumn, DataGridProps } from './DataGrid/types';
-export { Timeline } from './Timeline/Timeline';
+export { default as Timeline } from './Timeline/Timeline';
+export type { TimelineItem, TimelineProps } from './Timeline/types';
 export { EventForm } from './EventForm/EventForm';
