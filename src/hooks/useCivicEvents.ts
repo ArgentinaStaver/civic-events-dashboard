@@ -8,9 +8,11 @@ const TIMELINE_EVENT_LIMIT = 10_000
 const text = (value: string | undefined): string => value?.trim() ?? ''
 
 const selectTimelineEvents = (events: CivicEventModel[]): CivicEventModel[] => {
+  const local = events.filter((event) => event.source === 'local')
+  const imported = events.filter((event) => event.source !== 'local')
   const byDay = new Map<string, CivicEventModel[]>()
 
-  for (const event of events) {
+  for (const event of imported) {
     const day = event.date.slice(0, 10)
     const group = byDay.get(day)
     if (group) group.push(event)
@@ -43,7 +45,8 @@ const selectTimelineEvents = (events: CivicEventModel[]): CivicEventModel[] => {
     pending = nextPending
   }
 
-  return days.flatMap((day) => (byDay.get(day) ?? []).slice(0, quotas.get(day) ?? 0))
+  const sampled = days.flatMap((day) => (byDay.get(day) ?? []).slice(0, quotas.get(day) ?? 0))
+  return [...local, ...sampled]
 }
 
 const toLocalEvent = (request: CivicEventRequestModel): CivicEventModel => ({
@@ -74,7 +77,10 @@ export const useCivicEvents = () => {
       try {
         const data = await loadCivicEvents()
         if (!cancelled) {
-          setEvents(data)
+          setEvents((current) => {
+            const local = current.filter((event) => event.source === 'local')
+            return [...local, ...data]
+          })
         }
       } catch (err) {
         if (!cancelled) {
