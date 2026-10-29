@@ -1,10 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import type { KeyboardEvent, MouseEvent } from 'react'
+import ViewColumnIcon from '@mui/icons-material/ViewColumn'
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
+import Button from '@mui/material/Button'
 import Checkbox from '@mui/material/Checkbox'
 import CircularProgress from '@mui/material/CircularProgress'
-import FormControlLabel from '@mui/material/FormControlLabel'
-import FormGroup from '@mui/material/FormGroup'
+import ListItemText from '@mui/material/ListItemText'
+import Menu from '@mui/material/Menu'
+import MenuItem from '@mui/material/MenuItem'
 import Paper from '@mui/material/Paper'
 import Table from '@mui/material/Table'
 import TableBody from '@mui/material/TableBody'
@@ -23,16 +27,19 @@ import {
   createFilteredRowModel,
   createPaginatedRowModel,
   createSortedRowModel,
-  filterFn_includesString,
   rowPaginationFeature,
   rowSortingFeature,
-  sortFn_alphanumeric,
   tableFeatures,
   useTable,
 } from '@tanstack/react-table'
 import type { DataGridProps } from './types'
 
 const FILTER_DELAY_MS = 200
+const HIGHLIGHT_MS = 2200
+const highlightedColumnBg = '#e5f4ea'
+const highlightedColumnHoverBg = '#d5eadc'
+
+type GridValue = string | number | null | undefined
 
 type TableRow = Record<string, any>
 
@@ -41,29 +48,57 @@ const features = tableFeatures({
   columnVisibilityFeature,
   rowSortingFeature,
   rowPaginationFeature,
-  filterFns: { includesString: filterFn_includesString },
-  sortFns: { alphanumeric: sortFn_alphanumeric },
   filteredRowModel: createFilteredRowModel(),
   sortedRowModel: createSortedRowModel(),
   paginatedRowModel: createPaginatedRowModel(),
 })
 
+const isEmptyValue = (value: GridValue) => value == null || value === ''
+
+const isTimestamp = (value: string) => /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2})?/.test(value)
+
+const compareGridValues = (left: GridValue, right: GridValue) => {
+  const leftEmpty = isEmptyValue(left)
+  const rightEmpty = isEmptyValue(right)
+  if (leftEmpty || rightEmpty) return leftEmpty === rightEmpty ? 0 : leftEmpty ? 1 : -1
+  if (typeof left === 'number' && typeof right === 'number') return left - right
+  if (typeof left === 'string' && typeof right === 'string' && isTimestamp(left) && isTimestamp(right)) {
+    return left < right ? -1 : left > right ? 1 : 0
+  }
+  return String(left).localeCompare(String(right), undefined, { numeric: true, sensitivity: 'base' })
+}
+
+const textOf = (value: GridValue) => (value == null ? '' : String(value))
+
 interface FilterableColumn {
+  getFilterValue: () => unknown
   setFilterValue: (value: string | undefined) => void
 }
 
+const storedFilterText = (column: FilterableColumn) => {
+  const stored = column.getFilterValue()
+  return typeof stored === 'string' ? stored : ''
+}
+
 const ColumnFilter = ({ column, label }: { column: FilterableColumn; label: string }) => {
-  const [value, setValue] = useState('')
-  const setFilterValue = useRef(column.setFilterValue)
+  const [value, setValue] = useState(() => storedFilterText(column))
+  const columnRef = useRef(column)
+  const skipNextWrite = useRef(true)
 
   useEffect(() => {
-    setFilterValue.current = column.setFilterValue
+    columnRef.current = column
   }, [column])
 
   useEffect(() => {
+    if (skipNextWrite.current) {
+      skipNextWrite.current = false
+      return
+    }
+
     const timeout = window.setTimeout(() => {
       const next = value.trim()
-      setFilterValue.current(next ? next : undefined)
+      if (next === storedFilterText(columnRef.current)) return
+      columnRef.current.setFilterValue(next ? next : undefined)
     }, FILTER_DELAY_MS)
 
     return () => window.clearTimeout(timeout)
@@ -74,7 +109,7 @@ const ColumnFilter = ({ column, label }: { column: FilterableColumn; label: stri
       value={value}
       size="small"
       placeholder="Filter"
-      aria-label={`Filter ${label}`}
+      slotProps={{ htmlInput: { 'aria-label': `Filter ${label}` } }}
       onClick={(event) => event.stopPropagation()}
       onChange={(event) => setValue(event.target.value)}
       fullWidth
@@ -93,25 +128,31 @@ const DataGrid = <T extends object>({
   selectedRowId,
   pageSizeOptions = [25, 50, 100],
   initialPageSize = 25,
+  rowHighlight = null,
 }: DataGridProps<T>) => {
   const tableColumns = useMemo(() => {
     const helper = createColumnHelper<typeof features, TableRow>()
 
     return helper.columns(
       columnDefs.map((column) =>
-        helper.accessor(
-          (row) => {
-            const value = column.accessor(row as T)
-            return value == null ? '' : String(value)
+        helper.accessor((row) => column.accessor(row as T), {
+          id: column.id,
+          header: column.label,
+          filterFn: (row, columnId, filterValue) => {
+            const value = row.getValue(columnId) as GridValue
+            const raw = textOf(value)
+            const shown = column.format ? column.format(value) : raw
+            const query = String(filterValue ?? '').toLowerCase()
+            return raw.toLowerCase().includes(query) || shown.toLowerCase().includes(query)
           },
-          {
-            id: column.id,
-            header: column.label,
-            filterFn: 'includesString',
-            sortFn: 'alphanumeric',
-            cell: (info) => info.getValue() || '—',
+          sortFn: (rowA, rowB, columnId) =>
+            compareGridValues(rowA.getValue(columnId) as GridValue, rowB.getValue(columnId) as GridValue),
+          cell: (info) => {
+            const value = info.getValue() as GridValue
+            if (isEmptyValue(value)) return '—'
+            return column.format ? column.format(value) : value
           },
-        ),
+        }),
       ),
     )
   }, [columnDefs])
@@ -132,6 +173,55 @@ const DataGrid = <T extends object>({
     () => Object.fromEntries(columnDefs.map((column) => [column.id, column.label])),
     [columnDefs],
   )
+  const [highlightedColumnIds, setHighlightedColumnIds] = useState<ReadonlySet<string>>(() => new Set())
+  const highlightTimers = useRef(new Map<string, number>())
+  const tableContainerRef = useRef<HTMLDivElement>(null)
+  const pendingScrollRowId = useRef<string | null>(null)
+  const highlightedRowId = rowHighlight?.id
+
+  useEffect(() => {
+    const timers = highlightTimers.current
+    return () => {
+      for (const timeout of timers.values()) window.clearTimeout(timeout)
+    }
+  }, [])
+
+  const clearHighlight = (columnId: string) => {
+    const timeout = highlightTimers.current.get(columnId)
+    if (timeout) window.clearTimeout(timeout)
+    highlightTimers.current.delete(columnId)
+    setHighlightedColumnIds((current) => {
+      if (!current.has(columnId)) return current
+      const next = new Set(current)
+      next.delete(columnId)
+      return next
+    })
+  }
+
+  const highlightColumn = (columnId: string, visible: boolean) => {
+    clearHighlight(columnId)
+    if (!visible) return
+
+    setHighlightedColumnIds((current) => new Set(current).add(columnId))
+    const timeout = window.setTimeout(() => clearHighlight(columnId), HIGHLIGHT_MS)
+    highlightTimers.current.set(columnId, timeout)
+    window.setTimeout(() => {
+      tableContainerRef.current
+        ?.querySelector<HTMLElement>(`[data-column-id="${CSS.escape(columnId)}"]`)
+        ?.scrollIntoView({ inline: 'nearest', block: 'nearest' })
+    }, 0)
+  }
+
+  const highlightedCellSx = (columnId: string, rowId?: string) => ({
+    transition: 'background-color 0.6s ease',
+    ...(highlightedColumnIds.has(columnId) || (rowId != null && rowId === highlightedRowId)
+      ? {
+          bgcolor: highlightedColumnBg,
+          '.MuiTableRow-root.MuiTableRow-hover:hover &': { bgcolor: highlightedColumnHoverBg },
+          '.MuiTableRow-root.Mui-selected &': { bgcolor: highlightedColumnHoverBg },
+        }
+      : {}),
+  })
 
   const table = useTable({
     features,
@@ -141,6 +231,34 @@ const DataGrid = <T extends object>({
     initialState,
   })
 
+  useEffect(() => {
+    pendingScrollRowId.current = rowHighlight?.id ?? null
+  }, [rowHighlight])
+
+  useEffect(() => {
+    const rowId = pendingScrollRowId.current
+    if (!rowId) return
+
+    const index = table.getSortedRowModel().rows.findIndex((row) => row.id === rowId)
+    if (index < 0) return
+
+    const { pageSize, pageIndex } = table.state.pagination
+    const nextPage = Math.floor(index / pageSize)
+    if (pageIndex !== nextPage) {
+      table.setPageIndex(nextPage)
+      return
+    }
+
+    const node = tableContainerRef.current?.querySelector<HTMLElement>(
+      `[data-row-id="${CSS.escape(rowId)}"]`,
+    )
+    if (!node) return
+    pendingScrollRowId.current = null
+    node.scrollIntoView({ block: 'nearest' })
+  })
+
+  const columnsMenuId = useId()
+  const [columnsMenuAnchor, setColumnsMenuAnchor] = useState<HTMLElement | null>(null)
   const visibleColumnCount = Math.max(table.getVisibleLeafColumns().length, 1)
   const filteredCount = table.getRowCount()
   const pageRows = table.getRowModel().rows
@@ -148,33 +266,72 @@ const DataGrid = <T extends object>({
   const emptyMessage =
     rows.length === 0 ? 'No records to display.' : 'No records match the current filters.'
 
+  const openRow = onRowClick
+    ? (row: T) => {
+        onRowClick(row)
+      }
+    : undefined
+
+  const onRowKeyDown = openRow
+    ? (event: KeyboardEvent<HTMLTableRowElement>, row: T) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return
+        event.preventDefault()
+        openRow(row)
+      }
+    : undefined
+
   return (
-    <Paper variant="outlined">
+    <Paper
+      variant="outlined"
+      sx={{ minWidth: 0, minHeight: 0, flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
+    >
       <Box sx={{ px: 2, pt: 2 }}>
-        <Typography variant="subtitle2" component="h2" gutterBottom>
+        <Button
+          size="small"
+          startIcon={<ViewColumnIcon />}
+          aria-haspopup="menu"
+          aria-expanded={columnsMenuAnchor ? 'true' : undefined}
+          aria-controls={columnsMenuAnchor ? columnsMenuId : undefined}
+          onClick={(event: MouseEvent<HTMLButtonElement>) => setColumnsMenuAnchor(event.currentTarget)}
+        >
           Columns
-        </Typography>
-        <FormGroup row>
-          {table.getAllLeafColumns().map((column) => (
-            <FormControlLabel
-              key={column.id}
-              label={labels[column.id] ?? column.id}
-              control={
+        </Button>
+        <Menu
+          id={columnsMenuId}
+          anchorEl={columnsMenuAnchor}
+          open={Boolean(columnsMenuAnchor)}
+          onClose={() => setColumnsMenuAnchor(null)}
+        >
+          {table.getAllLeafColumns().map((column) => {
+            const label = labels[column.id] ?? column.id
+            const visible = column.getIsVisible()
+            return (
+              <MenuItem
+                key={column.id}
+                dense
+                role="menuitemcheckbox"
+                aria-checked={visible}
+                onClick={() => {
+                  const next = !visible
+                  column.toggleVisibility(next)
+                  highlightColumn(column.id, next)
+                }}
+              >
                 <Checkbox
                   size="small"
-                  checked={column.getIsVisible()}
-                  onChange={column.getToggleVisibilityHandler()}
-                  slotProps={{
-                    input: { 'aria-label': `Show ${labels[column.id] ?? column.id}` },
-                  }}
+                  checked={visible}
+                  tabIndex={-1}
+                  disableRipple
+                  slotProps={{ input: { 'aria-hidden': true } }}
                 />
-              }
-            />
-          ))}
-        </FormGroup>
+                <ListItemText primary={label} />
+              </MenuItem>
+            )
+          })}
+        </Menu>
       </Box>
 
-      <TableContainer>
+      <TableContainer ref={tableContainerRef} sx={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
         <Table size="small" stickyHeader aria-label="Data grid">
           <TableHead>
             {table.getHeaderGroups().map((headerGroup) => (
@@ -186,11 +343,16 @@ const DataGrid = <T extends object>({
                   return (
                     <TableCell
                       key={header.id}
+                      data-column-id={header.column.id}
                       sortDirection={sorted === false ? false : sorted}
                       aria-sort={
                         sorted === 'asc' ? 'ascending' : sorted === 'desc' ? 'descending' : 'none'
                       }
-                      sx={{ verticalAlign: 'top', minWidth: 160 }}
+                      sx={{
+                        verticalAlign: 'top',
+                        minWidth: 160,
+                        ...highlightedCellSx(header.column.id),
+                      }}
                     >
                       <TableSortLabel
                         active={sorted !== false}
@@ -243,13 +405,23 @@ const DataGrid = <T extends object>({
               pageRows.map((row) => (
                 <TableRow
                   key={row.id}
-                  hover={Boolean(onRowClick)}
+                  hover={Boolean(openRow)}
+                  data-row-id={row.id}
                   selected={row.id === selectedRowId}
-                  onClick={onRowClick ? () => onRowClick(row.original as T) : undefined}
-                  sx={{ cursor: onRowClick ? 'pointer' : 'default' }}
+                  tabIndex={openRow ? 0 : undefined}
+                  onClick={openRow ? () => openRow(row.original as T) : undefined}
+                  onKeyDown={onRowKeyDown ? (event) => onRowKeyDown(event, row.original as T) : undefined}
+                  sx={{
+                    cursor: openRow ? 'pointer' : 'default',
+                    '&:focus-visible': {
+                      outline: '2px solid',
+                      outlineColor: 'primary.main',
+                      outlineOffset: -2,
+                    },
+                  }}
                 >
                   {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id}>
+                    <TableCell key={cell.id} sx={highlightedCellSx(cell.column.id, row.id)}>
                       <table.FlexRender cell={cell} />
                     </TableCell>
                   ))}

@@ -3,6 +3,12 @@ export interface DataGridColumn<T extends object> {
   label: string
   defaultVisible?: boolean
   accessor: (row: T) => string | number | null | undefined
+  format?: (value: string | number | null | undefined) => string
+}
+
+export interface DataGridRowHighlight {
+  id: string
+  token: number
 }
 
 export interface DataGridProps<T extends object> {
@@ -13,6 +19,7 @@ export interface DataGridProps<T extends object> {
   selectedRowId?: string
   pageSizeOptions?: number[]
   initialPageSize?: number
+  rowHighlight?: DataGridRowHighlight | null
   getRowId: (row: T) => string
   onRowClick?: (row: T) => void
 }
