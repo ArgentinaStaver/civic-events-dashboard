@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
+import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Dialog from '@mui/material/Dialog'
 import DialogContent from '@mui/material/DialogContent'
 import DialogTitle from '@mui/material/DialogTitle'
+import Snackbar from '@mui/material/Snackbar'
 import Tab from '@mui/material/Tab'
 import Tabs from '@mui/material/Tabs'
 import Typography from '@mui/material/Typography'
@@ -75,16 +77,13 @@ const App = () => {
   const saveEvent = (values: EventFormValues) => {
     const saved = values.id ? updateEvent(values) : createEvent(values)
     setRowHighlight({ id: saved.id, token: Date.now() })
-    setStatusMessage(values.id ? 'Event saved.' : 'Event added.')
+    setStatusMessage(values.id ? 'Event updated!' : 'Event added!')
     closeForm()
   }
 
   useEffect(() => {
     if (!rowHighlight) return
-    const timeout = window.setTimeout(() => {
-      setRowHighlight(null)
-      setStatusMessage('')
-    }, 2200)
+    const timeout = window.setTimeout(() => setRowHighlight(null), 2200)
     return () => window.clearTimeout(timeout)
   }, [rowHighlight])
 
@@ -111,10 +110,6 @@ const App = () => {
         <Button variant="contained" onClick={openCreate}>
           New event
         </Button>
-      </Box>
-
-      <Box role="status" aria-live="polite" sx={{ minHeight: 24, color: 'success.main' }}>
-        {statusMessage}
       </Box>
 
       <Tabs
@@ -151,24 +146,37 @@ const App = () => {
 
       <Dialog open={formOpen} onClose={closeForm} fullWidth maxWidth="sm" aria-labelledby="event-form-title">
         <DialogTitle id="event-form-title">{editing ? 'Edit event' : 'New event'}</DialogTitle>
-        <DialogContent sx={{ pt: 1 }}>
-          <EventForm
-            key={editing?.id ?? 'create'}
-            initialValues={
-              editing
-                ? {
-                    id: editing.id,
-                    title: editing.title,
-                    date: editing.date,
-                    description: editing.description,
-                  }
-                : undefined
-            }
-            onSubmit={saveEvent}
-            onCancel={closeForm}
-          />
+        <DialogContent>
+          <Box sx={{ pt: 1.5 }}>
+            <EventForm
+              key={editing?.id ?? 'create'}
+              initialValues={
+                editing
+                  ? {
+                      id: editing.id,
+                      title: editing.title,
+                      date: editing.date,
+                      description: editing.description,
+                    }
+                  : undefined
+              }
+              onSubmit={saveEvent}
+              onCancel={closeForm}
+            />
+          </Box>
         </DialogContent>
       </Dialog>
+
+      <Snackbar
+        open={Boolean(statusMessage)}
+        autoHideDuration={4000}
+        onClose={() => setStatusMessage('')}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+      >
+        <Alert severity="success" variant="filled">
+          {statusMessage}
+        </Alert>
+      </Snackbar>
     </Box>
   )
 }

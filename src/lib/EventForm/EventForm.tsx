@@ -27,7 +27,6 @@ const EventForm = ({ initialValues, onSubmit, onCancel }: EventFormProps) => {
   const dateRef = useRef<HTMLInputElement>(null)
   const [title, setTitle] = useState(initialValues?.title ?? '')
   const [date, setDate] = useState(() => toDateTimeLocal(initialValues?.date ?? new Date().toISOString()))
-  const [dateTouched, setDateTouched] = useState(isEdit)
   const [description, setDescription] = useState(initialValues?.description ?? '')
   const [errors, setErrors] = useState<FieldErrors>({})
   const [success, setSuccess] = useState('')
@@ -36,7 +35,7 @@ const EventForm = ({ initialValues, onSubmit, onCancel }: EventFormProps) => {
     event.preventDefault()
     const nextErrors: FieldErrors = {}
     const trimmedTitle = title.trim()
-    const chosenDate = !isEdit && !dateTouched ? toDateTimeLocal(new Date().toISOString()) : date
+    const chosenDate = date
 
     if (!trimmedTitle) nextErrors.title = 'Title is required.'
     if (!chosenDate.trim()) nextErrors.date = 'Date is required.'
@@ -64,7 +63,6 @@ const EventForm = ({ initialValues, onSubmit, onCancel }: EventFormProps) => {
     if (!isEdit) {
       setTitle('')
       setDate(toDateTimeLocal(new Date().toISOString()))
-      setDateTouched(false)
       setDescription('')
     }
   }
@@ -96,13 +94,12 @@ const EventForm = ({ initialValues, onSubmit, onCancel }: EventFormProps) => {
         value={date}
         onChange={(event) => {
           setDate(event.target.value)
-          setDateTouched(true)
           setErrors((current) => ({ ...current, date: undefined }))
           setSuccess('')
         }}
         required
         error={Boolean(errors.date)}
-        helperText={errors.date ?? (isEdit ? undefined : 'Leave unchanged to use the save time.')}
+        helperText={errors.date}
         inputRef={dateRef}
         fullWidth
         slotProps={{ inputLabel: { shrink: true } }}

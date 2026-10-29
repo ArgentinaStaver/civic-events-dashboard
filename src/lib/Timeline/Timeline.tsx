@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { KeyboardEvent } from 'react'
+import type { FocusEvent, KeyboardEvent } from 'react'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import Alert from '@mui/material/Alert'
@@ -27,6 +27,9 @@ interface TimelineItemRow {
 }
 
 type TimelineRow = TimelineGroupRow | TimelineItemRow
+
+const byDateDesc = (left: TimelineItem, right: TimelineItem) =>
+  right.date.localeCompare(left.date) || right.id.localeCompare(left.id)
 
 const dayKeyOf = (date: string) => date.slice(0, 10)
 
@@ -117,9 +120,11 @@ const Timeline = ({ items, loading = false, error = null }: TimelineProps) => {
   const pendingFocus = useRef(false)
   const [activeId, setActiveId] = useState<string | null>(null)
   const [announcement, setAnnouncement] = useState('')
+  const [focusRequest, setFocusRequest] = useState(0)
   const [collapsedDays, setCollapsedDays] = useState<ReadonlySet<string>>(() => new Set())
 
-  const rows = useMemo(() => buildRows(items, collapsedDays), [items, collapsedDays])
+  const sortedItems = useMemo(() => [...items].sort(byDateDesc), [items])
+  const rows = useMemo(() => buildRows(sortedItems, collapsedDays), [sortedItems, collapsedDays])
   const groupIndexes = useMemo(
     () => rows.flatMap((row, index) => (row.type === 'group' ? [index] : [])),
     [rows],
@@ -138,6 +143,7 @@ const Timeline = ({ items, loading = false, error = null }: TimelineProps) => {
   })
 
   const virtualItems = virtualizer.getVirtualItems()
+  const activeRowMounted = virtualItems.some((item) => item.index === activeIndex)
 
   const focusIndex = (index: number, message?: string) => {
     const row = rows[index]
@@ -162,7 +168,14 @@ const Timeline = ({ items, loading = false, error = null }: TimelineProps) => {
     if (!node) return
     node.focus({ preventScroll: true })
     pendingFocus.current = false
-  }, [activeIndex, virtualItems, virtualizer])
+  }, [activeIndex, virtualItems, virtualizer, focusRequest])
+
+  const onListFocus = (event: FocusEvent<HTMLDivElement>) => {
+    if (event.target !== event.currentTarget || rows.length === 0) return
+    setAnnouncement(describeMove(rows, activeIndex, activeIndex))
+    pendingFocus.current = true
+    setFocusRequest((count) => count + 1)
+  }
 
   const moveGroup = (direction: 1 | -1) => {
     let position = 0
@@ -215,6 +228,8 @@ const Timeline = ({ items, loading = false, error = null }: TimelineProps) => {
         ref={parentRef}
         role="list"
         aria-label="Timeline, grouped by day. Left and right move between days. Enter collapses the focused day."
+        tabIndex={!loading && !error && rows.length > 0 && !activeRowMounted ? 0 : undefined}
+        onFocus={onListFocus}
         onKeyDown={onKeyDown}
         sx={{
           height: 560,
@@ -223,6 +238,11 @@ const Timeline = ({ items, loading = false, error = null }: TimelineProps) => {
           borderColor: 'divider',
           borderRadius: 1,
           bgcolor: 'background.paper',
+          '&:focus-visible': {
+            outline: '2px solid',
+            outlineColor: 'primary.main',
+            outlineOffset: -2,
+          },
         }}
       >
         {loading && (
