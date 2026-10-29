@@ -1,8 +1,5 @@
 import type { CivicEventModel } from '../data-models/CivicEvent/CivicEventModel'
-import type {
-  CivicEventResponseModel,
-  CivicEventsResponse,
-} from '../data-models/CivicEvent/CivicEventResponseModel'
+import type { CivicEventResponseModel } from '../data-models/CivicEvent/CivicEventResponseModel'
 import { mapCivicEventResponseToModel } from '../data-models/CivicEvent/mapCivicEventResponseToModel'
 
 const DATA_URL = '/data/civic-events.json'
@@ -14,10 +11,5 @@ export const loadCivicEvents = async (): Promise<CivicEventModel[]> => {
   }
 
   const rows = (await res.json()) as CivicEventResponseModel[]
-  const response: CivicEventsResponse = {
-    status: res.status,
-    data: rows,
-  }
-
-  return (response.data ?? []).map(mapCivicEventResponseToModel)
+  return rows.map(mapCivicEventResponseToModel)
 }

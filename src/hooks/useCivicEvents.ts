@@ -142,13 +142,7 @@ export const useCivicEvents = () => {
     return updated
   }
 
-  const timelineEvents = useMemo(
-    () =>
-      selectTimelineEvents(events).sort(
-        (a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id),
-      ),
-    [events],
-  )
+  const timelineEvents = useMemo(() => selectTimelineEvents(events), [events])
 
   return { events, timelineEvents, loading, error, createEvent, updateEvent }
 }

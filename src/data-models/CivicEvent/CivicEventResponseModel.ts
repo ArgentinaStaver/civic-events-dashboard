@@ -1,5 +1,3 @@
-import type { ResponseModel } from '../ResponseModel'
-
 export interface CivicEventResponseModel {
   unique_key: string
   created_date: string
@@ -13,8 +11,4 @@ export interface CivicEventResponseModel {
   open_data_channel_type?: string
   agency_name?: string
   resolution_description?: string
-}
-
-export interface CivicEventsResponse extends ResponseModel {
-  data?: CivicEventResponseModel[]
 }
