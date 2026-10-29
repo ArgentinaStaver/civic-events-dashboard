@@ -10,20 +10,8 @@ import Typography from '@mui/material/Typography'
 import type { CivicEventModel } from './data-models/CivicEvent/CivicEventModel'
 import { useCivicEvents } from './hooks/useCivicEvents'
 import { DataGrid, EventForm, Timeline } from './lib'
+import { formatTimestamp } from './services/utils'
 import type { DataGridColumn, DataGridRowHighlight, EventFormValues, TimelineItem } from './lib'
-
-const formatTimestamp = (value: string | number | null | undefined) => {
-  if (value == null || value === '') return ''
-  const parsed = new Date(String(value))
-  if (Number.isNaN(parsed.getTime())) return String(value)
-  return parsed.toLocaleString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  })
-}
 
 const columns: DataGridColumn<CivicEventModel>[] = [
   { id: 'id', label: 'Request ID', accessor: (row) => row.id },

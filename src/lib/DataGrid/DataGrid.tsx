@@ -32,6 +32,7 @@ import {
   tableFeatures,
   useTable,
 } from '@tanstack/react-table'
+import { compareText, isTimestamp } from '../../services/utils'
 import type { DataGridProps } from './types'
 
 const FILTER_DELAY_MS = 200
@@ -55,8 +56,6 @@ const features = tableFeatures({
 
 const isEmptyValue = (value: GridValue) => value == null || value === ''
 
-const isTimestamp = (value: string) => /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2})?/.test(value)
-
 const compareGridValues = (left: GridValue, right: GridValue) => {
   const leftEmpty = isEmptyValue(left)
   const rightEmpty = isEmptyValue(right)
@@ -65,7 +64,7 @@ const compareGridValues = (left: GridValue, right: GridValue) => {
   if (typeof left === 'string' && typeof right === 'string' && isTimestamp(left) && isTimestamp(right)) {
     return left < right ? -1 : left > right ? 1 : 0
   }
-  return String(left).localeCompare(String(right), undefined, { numeric: true, sensitivity: 'base' })
+  return compareText(String(left), String(right))
 }
 
 const textOf = (value: GridValue) => (value == null ? '' : String(value))
@@ -130,6 +129,24 @@ const DataGrid = <T extends object>({
   initialPageSize = 25,
   rowHighlight = null,
 }: DataGridProps<T>) => {
+  const formattedSearchText = useMemo(() => {
+    const byColumn = new Map<string, string[]>()
+    for (const column of columnDefs) {
+      if (!column.format) continue
+      const format = column.format
+      byColumn.set(
+        column.id,
+        rows.map((row) => {
+          const value = column.accessor(row)
+          const raw = textOf(value).toLowerCase()
+          const shown = format(value).toLowerCase()
+          return raw === shown ? raw : `${raw}\n${shown}`
+        }),
+      )
+    }
+    return byColumn
+  }, [rows, columnDefs])
+
   const tableColumns = useMemo(() => {
     const helper = createColumnHelper<typeof features, TableRow>()
 
@@ -139,11 +156,10 @@ const DataGrid = <T extends object>({
           id: column.id,
           header: column.label,
           filterFn: (row, columnId, filterValue) => {
-            const value = row.getValue(columnId) as GridValue
-            const raw = textOf(value)
-            const shown = column.format ? column.format(value) : raw
             const query = String(filterValue ?? '').toLowerCase()
-            return raw.toLowerCase().includes(query) || shown.toLowerCase().includes(query)
+            const indexed = formattedSearchText.get(columnId)
+            if (indexed) return indexed[row.index]?.includes(query) ?? false
+            return textOf(row.getValue(columnId) as GridValue).toLowerCase().includes(query)
           },
           sortFn: (rowA, rowB, columnId) =>
             compareGridValues(rowA.getValue(columnId) as GridValue, rowB.getValue(columnId) as GridValue),
@@ -155,7 +171,7 @@ const DataGrid = <T extends object>({
         }),
       ),
     )
-  }, [columnDefs])
+  }, [columnDefs, formattedSearchText])
 
   const initialState = useMemo(
     () => ({
